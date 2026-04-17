@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>日程助手</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 480px; margin: 0 auto; }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .input-group { margin-bottom: 16px; }
+        label { display: block; color: #666; font-size: 14px; margin-bottom: 8px; }
+        textarea {
+            width: 100%;
+            padding: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            resize: none;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        textarea:focus { border-color: #667eea; }
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:active { transform: translateY(0); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .result { margin-top: 20px; padding: 16px; background: #f8f9fa; border-radius: 12px; display: none; }
+        .result.show { display: block; }
+        .result-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .result-item:last-child { border-bottom: none; }
+        .result-label { color: #666; font-size: 14px; }
+        .result-value { color: #333; font-weight: 500; }
+        .history { margin-top: 20px; }
+        .history h3 { color: white; font-size: 16px; margin-bottom: 12px; }
+        .schedule-item {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .schedule-item h4 { color: #333; font-size: 16px; margin-bottom: 8px; }
+        .schedule-item .time { color: #667eea; font-size: 14px; }
+        .schedule-item .summary { color: #666; font-size: 14px; margin-top: 4px; }
+        .schedule-item .remind-time { color: #999; font-size: 12px; margin-top: 4px; }
+        .schedule-item .notified {
+            background: #4CAF50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+        .empty { color: rgba(255,255,255,0.7); text-align: center; padding: 20px; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #4CAF50; }
+        .toast.error { background: #f44336; }
+        .status-bar {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+        .btn-small { padding: 8px 12px; font-size: 12px; width: auto; margin-right: 8px; }
+        .btn-danger { background: #f44336; }
+        .btn-send { background: #4CAF50; }
+        .pending { color: #FF9800; }
+        .done { color: #4CAF50; }
+        .sync-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .sync-indicator.online { background: #4CAF50; }
+        .sync-indicator.offline { background: #FF9800; }
+        .sw-status { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <h1>📅 日程助手</h1>
+
+    <div class="container">
+        <div class="status-bar">
+            <span id="status">检查中...</span>
+            <div class="sw-status" id="swStatus"></div>
+        </div>
+
+        <div class="card">
+            <div class="input-group">
+                <label>输入你的日程安排（说得越自然越好）</label>
+                <textarea id="input" rows="3" placeholder="例如：明天下午3点有个组会，记得提前准备PPT"></textarea>
+            </div>
+            <button id="submit" onclick="parseSchedule()">解析日程</button>
+
+            <div id="result" class="result">
+                <div class="result-item">
+                    <span class="result-label">事件</span>
+                    <span id="event" class="result-value"></span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">时间</span>
+                    <span id="time" class="result-value"></span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">提前提醒</span>
+                    <span id="advance" class="result-value"></span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">总结</span>
+                    <span id="summary" class="result-value"></span>
+                </div>
+                
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+                    <label style="color: #333; font-weight: 500;">选择提醒方式（可选）：</label>
+                    <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                        <button class="btn-small" onclick="setReminder(0)" style="background: #667eea;">准时提醒</button>
+                        <button class="btn-small" onclick="setReminder(5)" style="background: #667eea;">提前5分钟</button>
+                        <button class="btn-small" onclick="setReminder(10)" style="background: #667eea;">提前10分钟</button>
+                        <button class="btn-small" onclick="setReminder(30)" style="background: #667eea;">提前30分钟</button>
+                        <button class="btn-small" onclick="setReminder(60)" style="background: #667eea;">提前1小时</button>
+                        <button class="btn-small" onclick="setReminder(1440)" style="background: #667eea;">提前1天</button>
+                    </div>
+                </div>
+                
+                <button onclick="saveSchedule()" style="margin-top: 16px; background: #4CAF50;">保存到日程</button>
+            </div>
+        </div>
+
+        <div class="history">
+            <h3>📋 我的日程</h3>
+            <div id="scheduleList">
+                <div class="empty">暂无日程，添加一个吧</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // 配置
+        const PUSHPLUS_TOKEN = '560ed4722e304023a18e893e986205a6';
+        const WORKER_API = 'https://schedule-ai.todrink2333.workers.dev/api';
+        
+        // 状态
+        let parsedData = null;
+        let checkInterval = null;
+        let currentAdvanceMinutes = null;
+        let cloudAvailable = false;
+        let isSyncing = false;
+        let swRegistered = false;
+
+        function showToast(message, type = '') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast show' + (type ? ' ' + type : '');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+        
+        function updateStatus() {
+            const status = document.getElementById('status');
+            const indicator = cloudAvailable 
+                ? '<span class="sync-indicator online"></span>云端同步正常'
+                : '<span class="sync-indicator offline"></span>本地模式（云端不可用）';
+            status.innerHTML = indicator;
+            status.style.background = cloudAvailable ? 'rgba(76, 175, 80, 0.3)' : 'rgba(255, 152, 0, 0.3)';
+        }
+
+        function updateSWStatus(registered) {
+            const swStatus = document.getElementById('swStatus');
+            swStatus.textContent = registered ? '🔔 后台提醒已开启' : '⚠️ 后台提醒未启用（需HTTPS访问）';
+        }
+
+        // 注册 Service Worker
+        async function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.register('sw.js');
+                    console.log('SW 注册成功');
+                    swRegistered = true;
+                    updateSWStatus(true);
+                    
+                    navigator.serviceWorker.addEventListener('message', (event) => {
+                        if (event.data && event.data.type === 'SCHEDULES_UPDATED') {
+                            renderSchedules();
+                            showToast('日程已更新', 'success');
+                        }
+                    });
+                    
+                    return registration;
+                } catch (error) {
+                    console.log('SW 注册失败:', error);
+                    swRegistered = false;
+                    updateSWStatus(false);
+                    return null;
+                }
+            }
+            updateSWStatus(false);
+            return null;
+        }
+
+        // 请求通知权限
+        async function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    showToast('已开启系统通知', 'success');
+                }
+            }
+        }
+
+        async function checkCloudConnection() {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 3000);
+            
+            try {
+                const response = await fetch(WORKER_API, { method: 'GET', signal: controller.signal });
+                clearTimeout(timeout);
+                cloudAvailable = response.ok;
+            } catch (e) {
+                cloudAvailable = false;
+            }
+            updateStatus();
+            return cloudAvailable;
+        }
+
+        async function fetchFromCloud() {
+            if (!cloudAvailable || isSyncing) return null;
+            isSyncing = true;
+            try {
+                const response = await fetch(WORKER_API, { method: 'GET', cache: 'no-store' });
+                if (response.ok) return await response.json();
+            } catch (e) { console.log('获取云端数据失败:', e); }
+            finally { isSyncing = false; }
+            return null;
+        }
+
+        async function pushToCloud(schedules) {
+            if (!cloudAvailable || isSyncing) return false;
+            isSyncing = true;
+            try {
+                const response = await fetch(WORKER_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ schedules })
+                });
+                if (response.ok) return true;
+            } catch (e) { console.log('推送云端失败:', e); }
+            finally { isSyncing = false; }
+            return false;
+        }
+
+        function getSchedules() {
+            return JSON.parse(localStorage.getItem('schedules') || '[]');
+        }
+
+        function saveSchedulesLocal(schedules) {
+            localStorage.setItem('schedules', JSON.stringify(schedules));
+        }
+
+        async function saveAndSync(schedules) {
+            saveSchedulesLocal(schedules);
+            if (cloudAvailable) await pushToCloud(schedules);
+        }
+
+        // 汉字数字转阿拉伯数字
+        function chineseToNumber(text) {
+            const cnMap = {
+                '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+                '两': 2, '几': 3
+            };
+            let result = text;
+            result = result.replace(/^十(\d)?/g, (m, p1) => p1 ? '10' + p1 : '10');
+            result = result.replace(/(.)?十(\d)?/g, (m, p1, p2) => {
+                if (!p1) return '10' + (p2 || '');
+                const base = cnMap[p1] || parseInt(p1) || 0;
+                if (p2) {
+                    const last = cnMap[p2] || parseInt(p2) || 0;
+                    return String(base * 10 + last);
+                }
+                return String(base * 10);
+            });
+            for (const [cn, num] of Object.entries(cnMap)) {
+                result = result.replace(new RegExp(cn, 'g'), String(num));
+            }
+            return result;
+        }
+
+        function parseTimeLocal(text) {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth() + 1;
+            const day = now.getDate();
+            let targetDate = new Date(now);
+            let hour = null, minute = null;
+            
+            text = text.replace(/\s+/g, ' ');
+            text = chineseToNumber(text);
+            
+            let match = text.match(/(\d+)\s*分钟?\s*后/);
+            if (match) {
+                targetDate = new Date(now.getTime() + parseInt(match[1]) * 60 * 1000);
+                return { time: formatTimeForInput(targetDate), method: `${match[1]}分钟后` };
+            }
+            
+            match = text.match(/(\d+)\s*小时?\s*后/);
+            if (match) {
+                targetDate = new Date(now.getTime() + parseInt(match[1]) * 60 * 60 * 1000);
+                return { time: formatTimeForInput(targetDate), method: `${match[1]}小时后` };
+            }
+            
+            if (/半\s*小\s*时?\s*后/.test(text)) {
+                targetDate = new Date(now.getTime() + 30 * 60 * 1000);
+                return { time: formatTimeForInput(targetDate), method: '半小时后' };
+            }
+            
+            match = text.match(/明\s*天\s*(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
+            if (match) {
+                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                targetDate = new Date(year, month - 1, day + 1, hour, minute);
+                return { time: formatTimeForInput(targetDate), method: `明天${hour}点${minute > 0 ? minute + '分' : ''}` };
+            }
+            
+            match = text.match(/明\s*天\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            if (match) {
+                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                targetDate = new Date(year, month - 1, day + 1, hour, minute);
+                return { time: formatTimeForInput(targetDate), method: `明天${hour}点${minute > 0 ? minute + '分' : ''}` };
+            }
+            
+            match = text.match(/(?:今\s*天|今\s*日)(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
+            if (match) {
+                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                const todayTarget = new Date(year, month - 1, day, hour, minute);
+                targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
+                return { time: formatTimeForInput(targetDate), method: `今天${hour}点${minute > 0 ? minute + '分' : ''}` };
+            }
+            
+            match = text.match(/(?:今\s*天|今\s*日)\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            if (match) {
+                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                const todayTarget = new Date(year, month - 1, day, hour, minute);
+                targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
+                return { time: formatTimeForInput(targetDate), method: `今天${hour}点${minute > 0 ? minute + '分' : ''}` };
+            }
+            
+            match = text.match(/(\d{1,2})\s*点\s*(\d{1,2})\s*分/);
+            if (match) {
+                hour = parseInt(match[1]); minute = parseInt(match[2]);
+                const todayTarget = new Date(year, month - 1, day, hour, minute);
+                targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
+                return { time: formatTimeForInput(targetDate), method: `${hour}点${minute}分` };
+            }
+            
+            match = text.match(/(\d{1,2})\s*点(?!\s*\d)/);
+            if (match) {
+                hour = parseInt(match[1]); minute = 0;
+                const todayTarget = new Date(year, month - 1, day, hour, minute);
+                targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
+                return { time: formatTimeForInput(targetDate), method: `${hour}点` };
+            }
+            
+            match = text.match(/下\s*个\s*小\s*时/);
+            if (match) {
+                targetDate = new Date(now.getTime() + 60 * 60 * 1000);
+                return { time: formatTimeForInput(targetDate), method: '下个小时' };
+            }
+            
+            match = text.match(/后\s*天\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            if (match) {
+                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                targetDate = new Date(year, month - 1, day + 2, hour, minute);
+                return { time: formatTimeForInput(targetDate), method: `后天${hour}点` };
+            }
+            
+            return null;
+        }
+
+        function extractEvent(text) {
+            let event = text
+                .replace(/(\d+)\s*分钟?\s*后/gi, '')
+                .replace(/(\d+)\s*小时?\s*后/gi, '')
+                .replace(/半\s*小\s*时?\s*后/gi, '')
+                .replace(/明\s*天/gi, '').replace(/今\s*[天日]/gi, '').replace(/后\s*天/gi, '')
+                .replace(/早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?/gi, '')
+                .replace(/(\d{1,2})\s*点\s*(\d{1,2})\s*分/gi, '').replace(/(\d{1,2})\s*点/gi, '')
+                .replace(/下\s*个\s*小\s*时/gi, '').replace(/[：:]\s*/g, ' ')
+                .replace(/[,，.。!！?？]+/g, ' ').replace(/\s+/g, ' ').trim();
+            
+            if (event.length < 2) {
+                const parts = text.split(/[，。、！？：:]/);
+                event = parts[parts.length - 1] || text;
+                event = event.replace(/\d+\s*点.*$/, '').trim();
+            }
+            event = event.replace(/^(提醒|记得|记着|要|需要|别忘了|不要忘记)\s*/i, '');
+            return event || '日程';
+        }
+
+        async function parseSchedule() {
+            const input = document.getElementById('input').value.trim();
+            if (!input) { showToast('请输入日程内容', 'error'); return; }
+
+            const btn = document.getElementById('submit');
+            const result = document.getElementById('result');
+            btn.disabled = true;
+            btn.textContent = '解析中...';
+            result.classList.remove('show');
+
+            const timeResult = parseTimeLocal(input);
+            
+            if (timeResult) {
+                const event = extractEvent(input);
+                parsedData = {
+                    event: event,
+                    time: timeResult.time,
+                    advance: 10,
+                    summary: `${timeResult.method}提醒：${event}`,
+                    method: timeResult.method
+                };
+
+                document.getElementById('event').textContent = parsedData.event;
+                document.getElementById('time').textContent = parsedData.time;
+                document.getElementById('advance').textContent = parsedData.advance + ' 分钟';
+                document.getElementById('summary').textContent = parsedData.summary;
+                result.classList.add('show');
+                showToast('解析成功（本地）', 'success');
+                btn.disabled = false;
+                btn.textContent = '解析日程';
+                return;
+            }
+            
+            showToast('无法识别时间，请说得更明确些', 'error');
+            btn.disabled = false;
+            btn.textContent = '解析日程';
+        }
+
+        function formatTimeForInput(date) {
+            return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+        }
+
+        function setReminder(minutes) {
+            currentAdvanceMinutes = minutes;
+            if (parsedData) {
+                const display = minutes === 0 ? '准时' : (minutes >= 60 ? (minutes/60) + '小时' : minutes + '分钟');
+                document.getElementById('advance').textContent = '提前 ' + display;
+                document.getElementById('advance').style.color = '#4CAF50';
+            }
+            showToast('已设置为提前' + (minutes === 0 ? '准时提醒' : display), 'success');
+        }
+
+        async function saveSchedule() {
+            if (!parsedData) return;
+            let schedules = getSchedules();
+            const eventTime = new Date(parsedData.time.replace(' ', 'T'));
+            if (isNaN(eventTime.getTime())) { showToast('时间格式无效', 'error'); return; }
+
+            const advanceMinutes = currentAdvanceMinutes !== null ? currentAdvanceMinutes : parsedData.advance;
+            const remindTime = new Date(eventTime.getTime() - advanceMinutes * 60 * 1000);
+            currentAdvanceMinutes = null;
+
+            const newSchedule = {
+                ...parsedData,
+                id: Date.now(),
+                createdAt: new Date().toISOString(),
+                eventTime: eventTime.toISOString(),
+                remindAt: remindTime.toISOString(),
+                notified: false
+            };
+
+            schedules.push(newSchedule);
+            await saveAndSync(schedules);
+            renderSchedules();
+            showToast('日程已保存！' + (cloudAvailable ? '' : '（本地模式）'), 'success');
+            document.getElementById('input').value = '';
+            document.getElementById('result').classList.remove('show');
+            parsedData = null;
+        }
+
+        async function sendPushPlus(title, content) {
+            try {
+                const url = `http://www.pushplus.plus/send?token=${PUSHPLUS_TOKEN}&title=${encodeURIComponent(title)}&content=${encodeURIComponent(content)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                return data.code === 200;
+            } catch (error) { console.error('推送失败:', error); return false; }
+        }
+
+        function checkReminders() {
+            let schedules = getSchedules();
+            const now = new Date();
+
+            schedules.forEach(schedule => {
+                if (schedule.notified) return;
+                const remindTime = new Date(schedule.remindAt);
+                if (now >= remindTime) {
+                    const title = `📅 提醒：${schedule.event}`;
+                    const content = `${schedule.summary}\n\n⏰ 事件时间：${schedule.time}\n🔔 提醒时间：${formatTime(remindTime)}`;
+                    sendPushPlus(title, content).then(success => {
+                        if (success) {
+                            schedule.notified = true;
+                            saveAndSync(schedules);
+                            renderSchedules();
+                            showToast(`已推送：${schedule.event}`, 'success');
+                        }
+                    });
+                }
+            });
+        }
+
+        function formatTime(date) {
+            return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+        }
+
+        async function deleteSchedule(id) {
+            let schedules = getSchedules();
+            const filtered = schedules.filter(s => s.id !== id);
+            await saveAndSync(filtered);
+            renderSchedules();
+            showToast('已删除');
+        }
+
+        async function renderSchedules() {
+            const list = document.getElementById('scheduleList');
+            let schedules = getSchedules();
+
+            if (cloudAvailable) {
+                const cloudData = await fetchFromCloud();
+                if (cloudData && cloudData.length > 0) {
+                    const localIds = schedules.map(s => s.id);
+                    let hasNew = false;
+                    cloudData.forEach(cs => {
+                        if (!localIds.includes(cs.id)) { schedules.push(cs); hasNew = true; }
+                    });
+                    if (hasNew) await saveAndSync(schedules);
+                }
+            }
+
+            if (schedules.length === 0) {
+                list.innerHTML = '<div class="empty">暂无日程，添加一个吧</div>';
+                return;
+            }
+
+            schedules.sort((a, b) => new Date(a.remindAt) - new Date(b.remindAt));
+            const now = new Date();
+
+            list.innerHTML = schedules.map(s => {
+                const eventTime = new Date(s.eventTime);
+                const isPast = eventTime < now && !s.notified;
+                const statusClass = s.notified ? 'done' : (isPast ? 'pending' : '');
+                return `
+                    <div class="schedule-item">
+                        <h4>${s.event} ${s.notified ? '<span class="notified">已通知</span>' : ''}</h4>
+                        <div class="time ${statusClass}">⏰ ${s.time}</div>
+                        <div class="remind-time">🔔 提醒时间：${formatTime(new Date(s.remindAt))}</div>
+                        <div class="summary">${s.summary}</div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn-small btn-send" onclick="manualSend(${s.id})">立即推送</button>
+                            <button class="btn-small btn-danger" onclick="deleteSchedule(${s.id})">删除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function manualSend(id) {
+            let schedules = getSchedules();
+            const schedule = schedules.find(s => s.id === id);
+            if (!schedule) return;
+            const success = await sendPushPlus(`📅 提醒：${schedule.event}`, `${schedule.summary}\n\n⏰ 事件时间：${schedule.time}`);
+            if (success) {
+                schedule.notified = true;
+                await saveAndSync(schedules);
+                renderSchedules();
+                showToast('推送成功！', 'success');
+            } else {
+                showToast('推送失败，请重试', 'error');
+            }
+        }
+
+        async function init() {
+            await checkCloudConnection();
+            await registerServiceWorker();
+            await requestNotificationPermission();
+            await renderSchedules();
+            checkReminders();
+        }
+
+        checkInterval = setInterval(checkReminders, 60000);
+        setInterval(checkCloudConnection, 3 * 60 * 1000);
+        document.addEventListener('visibilitychange', async () => {
+            if (!document.hidden) {
+                await checkCloudConnection();
+                await renderSchedules();
+                checkReminders();
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>
