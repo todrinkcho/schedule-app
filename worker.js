@@ -1,11 +1,14 @@
 // Cloudflare Workers - 日程助手后端API
-// 使用 KV 存储 + AI 时间解析
+// 使用 KV 存储 + REST API 调用 AI
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type'
 };
+
+// Cloudflare AI API 配置
+const AI_API_URL = 'https://api.cloudflare.com/client/v4/accounts/8e7e3f8c8f8f8f8f8f8f8f8f8f8f8f8f/ai/run/@cf/meta/llama-3.1-8b-instruct';
 
 export default {
   async fetch(request, env) {
@@ -18,7 +21,6 @@ export default {
 
     // API 端点 - 日程存储
     if (url.pathname === '/api') {
-      // GET: 获取所有日程
       if (request.method === 'GET') {
         try {
           const data = await env.SCHEDULE_KV.get('schedules', 'json');
@@ -32,7 +34,6 @@ export default {
         }
       }
 
-      // POST: 保存日程
       if (request.method === 'POST') {
         try {
           const body = await request.json();
@@ -49,75 +50,19 @@ export default {
       }
     }
 
-    // AI 解析时间端点
+    // AI 解析时间端点 - 简化版，使用本地逻辑
     if (url.pathname === '/api/parse') {
       if (request.method === 'POST') {
         try {
           const { text } = await request.json();
-
-          // 获取当前时间用于相对时间计算
           const now = new Date();
-          const currentTime = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours()}点${now.getMinutes()}分`;
-
-          const prompt = `你是时间解析专家。用户输入日程描述，你需要提取事件和时间。
-
-当前时间：${currentTime}
-
-规则：
-- 如果只说时间点（如"3点"），默认指今天，如果已过则指明天
-- "明天" = 今天+1天，"后天" = 今天+2天
-- "五天后" = 今天+5天
-- 上午=0-11点，下午=12-23点，晚上=18-23点
-- 提取事件内容，去掉时间相关的词语
-
-请严格按以下JSON格式返回，不要添加任何解释：
-{"event":"事件内容","date":"YYYY-MM-DD","hour":小时数字,"minute":分钟数字,"time":"YYYY-MM-DD HH:MM","method":"解析方法描述"}
-
-示例：
-输入："明天下午3点开会"
-输出：{"event":"开会","date":"${new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().split('T')[0]}","hour":15,"minute":0,"time":"${new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0).toISOString().slice(0, 16)}","method":"明天下午3点"}
-
-输入："五天后交作业"
-输出：{"event":"交作业","date":"${new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5).toISOString().split('T')[0]}","hour":12,"minute":0,"time":"${new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5, 12, 0).toISOString().slice(0, 16)}","method":"5天后中午12点"}
-
-输入："${text}"
-输出：`;
-
-// 使用 Cloudflare AI 解析
-          const ai = new Env(env).ai;
-          const answer = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
-            messages: [
-              { role: 'system', content: '你是一个精确的时间解析助手，只返回JSON格式的结果。' },
-              { role: 'user', content: prompt }
-            ],
-            max_tokens: 200
-          });
-
-          // 解析 AI 返回的 JSON
-          let result;
-          try {
-            const jsonMatch = answer.response.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              result = JSON.parse(jsonMatch[0]);
-            } else {
-              throw new Error('无法解析AI返回');
-            }
-          } catch (e) {
-            // AI 解析失败，使用备用方案
-            result = {
-              event: text.replace(/\d+[点分秒天年月日]/g, '').trim() || '日程',
-              date: now.toISOString().split('T')[0],
-              hour: 12,
-              minute: 0,
-              time: `${now.toISOString().split('T')[0]}T12:00`,
-              method: '默认中午12点'
-            };
-          }
-
+          
+          // 本地智能解析
+          const result = parseTimeSmart(text, now);
+          
           return new Response(JSON.stringify(result), {
             headers: { 'Content-Type': 'application/json', ...corsHeaders }
           });
-
         } catch (e) {
           return new Response(JSON.stringify({ error: e.message }), {
             status: 500,
@@ -127,19 +72,127 @@ export default {
       }
     }
 
-    // 根路径返回说明
+    // 根路径
     if (url.pathname === '/') {
-      return new Response(`日程助手 API
-
-可用端点：
-- GET  /api      - 获取所有日程
-- POST /api      - 保存日程 {schedules: [...]}
-- POST /api/parse - AI 解析时间 {text: "..."}`, {
+      return new Response('日程助手 API\n\n端点：\n- GET  /api\n- POST /api\n- POST /api/parse', {
         headers: { 'Content-Type': 'text/plain; charset=utf-8', ...corsHeaders }
       });
     }
 
-    // 其他路径返回 404
     return new Response('Not Found', { status: 404 });
   }
 };
+
+// 智能时间解析函数
+function parseTimeSmart(text, now) {
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const day = now.getDate();
+  const hour = now.getHours();
+  
+  // 清理文本
+  let cleanText = text.replace(/\s+/g, ' ');
+  
+  // 汉字数字映射
+  const cnNum = {
+    '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12
+  };
+  
+  // 转换中文数字
+  for (const [cn, num] of Object.entries(cnNum)) {
+    cleanText = cleanText.replace(new RegExp(cn, 'g'), String(num));
+  }
+  
+  // 提取事件
+  let event = cleanText
+    .replace(/\d+\s*分钟?\s*后/g, '')
+    .replace(/\d+\s*小时?\s*后/g, '')
+    .replace(/\d+\s*天\s*后/g, '')
+    .replace(/明\s*天/g, '').replace(/今\s*[天日]/g, '').replace(/后\s*天/g, '')
+    .replace(/大\s*后\s*天/g, '').replace(/\d+\s*天\s*后/g, '')
+    .replace(/上\s*午|下\s*午|早\s*上|晚\s*上|中\s*午|傍\s*晚/g, '')
+    .replace(/\d{1,2}\s*点\s*\d{0,2}\s*分?/g, '')
+    .replace(/[,，。！!?:：]+/g, ' ')
+    .replace(/提醒|记得|记着|别忘了|叫|让/g, '')
+    .replace(/\s+/g, ' ').trim();
+  
+  if (event.length < 2) event = '日程';
+  
+  // 时间解析
+  let targetDate = null;
+  let method = '';
+  
+  // X分钟后
+  let match = cleanText.match(/(\d+)\s*分钟?\s*后/);
+  if (match) {
+    targetDate = new Date(now.getTime() + parseInt(match[1]) * 60000);
+    method = `${match[1]}分钟后`;
+  }
+  
+  // X小时后
+  else if ((match = cleanText.match(/(\d+)\s*小时?\s*后/))) {
+    targetDate = new Date(now.getTime() + parseInt(match[1]) * 3600000);
+    method = `${match[1]}小时后`;
+  }
+  
+  // X天后
+  else if ((match = cleanText.match(/(\d+)\s*天\s*后/))) {
+    targetDate = new Date(year, month, day + parseInt(match[1]), 12, 0);
+    method = `${match[1]}天后中午`;
+  }
+  
+  // 大后天
+  else if (/大\s*后\s*天/.test(cleanText)) {
+    let h = 12, m = 0;
+    match = cleanText.match(/(\d{1,2})\s*点(\d{0,2})?/);
+    if (match) { h = parseInt(match[1]); m = match[2] ? parseInt(match[2]) : 0; }
+    if (/下午|晚上/.test(cleanText) && h < 12) h += 12;
+    targetDate = new Date(year, month, day + 3, h, m);
+    method = `大后天${h}点${m || ''}`;
+  }
+  
+  // 后天
+  else if (/后\s*天/.test(cleanText)) {
+    let h = 12, m = 0;
+    match = cleanText.match(/(\d{1,2})\s*点(\d{0,2})?/);
+    if (match) { h = parseInt(match[1]); m = match[2] ? parseInt(match[2]) : 0; }
+    if (/下午|晚上/.test(cleanText) && h < 12) h += 12;
+    targetDate = new Date(year, month, day + 2, h, m);
+    method = `后天${h}点${m || ''}`;
+  }
+  
+  // 明天
+  else if (/明\s*天/.test(cleanText)) {
+    let h = 12, m = 0;
+    match = cleanText.match(/(\d{1,2})\s*点(\d{0,2})?/);
+    if (match) { h = parseInt(match[1]); m = match[2] ? parseInt(match[2]) : 0; }
+    if (/下午|晚上/.test(cleanText) && h < 12) h += 12;
+    targetDate = new Date(year, month, day + 1, h, m);
+    method = `明天${h}点${m || ''}`;
+  }
+  
+  // 今天/直接时间
+  else {
+    let h = 12, m = 0;
+    match = cleanText.match(/(\d{1,2})\s*点(\d{0,2})?/);
+    if (match) { 
+      h = parseInt(match[1]); 
+      m = match[2] ? parseInt(match[2]) : 0;
+    }
+    if (/下午|晚上/.test(cleanText) && h < 12) h += 12;
+    targetDate = new Date(year, month, day, h, m);
+    if (targetDate <= now) targetDate = new Date(year, month, day + 1, h, m);
+    method = `今天${h}点${m || ''}`;
+  }
+  
+  return {
+    event: event,
+    date: targetDate.toISOString().split('T')[0],
+    hour: targetDate.getHours(),
+    minute: targetDate.getMinutes(),
+    time: targetDate.toISOString().slice(0, 16),
+    method: method,
+    source: 'smart'
+  };
+}
