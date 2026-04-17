@@ -413,12 +413,18 @@
             
             text = text.replace(/\s+/g, ' ');
             
-            // 汉字数字映射
-            const cnMap = { '零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 };
+            // 改进的汉字数字转换
+            const cnMap = {
+                '零': '0', '一': '1', '二': '2', '两': '2', '三': '3', '四': '4',
+                '五': '5', '六': '6', '七': '7', '八': '8', '九': '9',
+                '十一': '11', '十二': '12',
+                '十': '10'
+            };
             
-            // 转换中文数字
-            for (const [cn, num] of Object.entries(cnMap)) {
-                text = text.replace(new RegExp(cn, 'g'), String(num));
+            // 先转换多位数，再转换单位数
+            const sortedKeys = Object.keys(cnMap).sort((a, b) => b.length - a.length);
+            for (const cn of sortedKeys) {
+                text = text.replace(new RegExp(cn, 'g'), cnMap[cn]);
             }
             
             // X分钟后

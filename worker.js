@@ -93,15 +93,18 @@ function parseTimeSmart(text, now) {
   // 清理文本
   let cleanText = text.replace(/\s+/g, ' ');
   
-  // 汉字数字映射
+  // 汉字数字映射（先长后短避免冲突）
   const cnNum = {
-    '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
-    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12
+    '零': '0', '一': '1', '二': '2', '两': '2', '三': '3', '四': '4',
+    '五': '5', '六': '6', '七': '7', '八': '8', '九': '9',
+    '十一': '11', '十二': '12',
+    '十': '10'
   };
   
-  // 转换中文数字
-  for (const [cn, num] of Object.entries(cnNum)) {
-    cleanText = cleanText.replace(new RegExp(cn, 'g'), String(num));
+  // 先转换多位数，再转换单位数
+  const sorted = Object.entries(cnNum).sort((a, b) => b[0].length - a[0].length);
+  for (const [cn, num] of sorted) {
+    cleanText = cleanText.replace(new RegExp(cn, 'g'), num);
   }
   
   // 提取事件
