@@ -344,64 +344,94 @@
             text = text.replace(/\s+/g, ' ');
             text = chineseToNumber(text);
             
-            let match = text.match(/(\d+)\s*分钟?\s*后/);
+            // X分钟后
+            match = text.match(/(\d+)\s*分钟?\s*后/);
             if (match) {
                 targetDate = new Date(now.getTime() + parseInt(match[1]) * 60 * 1000);
                 return { time: formatTimeForInput(targetDate), method: `${match[1]}分钟后` };
             }
             
+            // X小时后
             match = text.match(/(\d+)\s*小时?\s*后/);
             if (match) {
                 targetDate = new Date(now.getTime() + parseInt(match[1]) * 60 * 60 * 1000);
                 return { time: formatTimeForInput(targetDate), method: `${match[1]}小时后` };
             }
             
+            // X天后
+            match = text.match(/(\d+)\s*天\s*后/);
+            if (match) {
+                targetDate = new Date(year, month - 1, day + parseInt(match[1]), 12, 0);
+                return { time: formatTimeForInput(targetDate), method: `${match[1]}天后` };
+            }
+            
+            // 半小時后
             if (/半\s*小\s*时?\s*后/.test(text)) {
                 targetDate = new Date(now.getTime() + 30 * 60 * 1000);
                 return { time: formatTimeForInput(targetDate), method: '半小时后' };
             }
             
-            match = text.match(/明\s*天\s*(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
+            // 上午/下午时间处理函数
+            function adjustHour(hour, text) {
+                if (/下午|晚上|傍晚|晚/.test(text) && hour < 12) hour += 12;
+                if (/上午|早上|早晨/.test(text) && hour === 12) hour = 0;
+                return hour;
+            }
+            
+            // 明天 上午/下午 时间
+            match = text.match(/明\s*天\s*(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)?[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
             if (match) {
                 hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                hour = adjustHour(hour, text);
                 targetDate = new Date(year, month - 1, day + 1, hour, minute);
                 return { time: formatTimeForInput(targetDate), method: `明天${hour}点${minute > 0 ? minute + '分' : ''}` };
             }
             
-            match = text.match(/明\s*天\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            // 今天 上午/下午 时间
+            match = text.match(/(?:今\s*天|今\s*日)\s*(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)?[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
             if (match) {
                 hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
-                targetDate = new Date(year, month - 1, day + 1, hour, minute);
-                return { time: formatTimeForInput(targetDate), method: `明天${hour}点${minute > 0 ? minute + '分' : ''}` };
-            }
-            
-            match = text.match(/(?:今\s*天|今\s*日)(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
-            if (match) {
-                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                hour = adjustHour(hour, text);
                 const todayTarget = new Date(year, month - 1, day, hour, minute);
                 targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
                 return { time: formatTimeForInput(targetDate), method: `今天${hour}点${minute > 0 ? minute + '分' : ''}` };
             }
             
-            match = text.match(/(?:今\s*天|今\s*日)\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            // 上午/下午 X点X分
+            match = text.match(/(?:上午?|下午|早上|晚上)\s*(\d{1,2})\s*点\s*(\d{1,2})\s*分/);
             if (match) {
-                hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                hour = parseInt(match[1]); minute = parseInt(match[2]);
+                hour = adjustHour(hour, text);
                 const todayTarget = new Date(year, month - 1, day, hour, minute);
                 targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
-                return { time: formatTimeForInput(targetDate), method: `今天${hour}点${minute > 0 ? minute + '分' : ''}` };
+                return { time: formatTimeForInput(targetDate), method: `今天${hour}点${minute}分` };
             }
             
+            // 上午/下午 X点
+            match = text.match(/(?:上午?|下午|早上|晚上)\s*(\d{1,2})\s*点(?!\s*\d)/);
+            if (match) {
+                hour = parseInt(match[1]); minute = 0;
+                hour = adjustHour(hour, text);
+                const todayTarget = new Date(year, month - 1, day, hour, minute);
+                targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
+                return { time: formatTimeForInput(targetDate), method: `今天${hour}点` };
+            }
+            
+            // X点X分
             match = text.match(/(\d{1,2})\s*点\s*(\d{1,2})\s*分/);
             if (match) {
                 hour = parseInt(match[1]); minute = parseInt(match[2]);
+                hour = adjustHour(hour, text);
                 const todayTarget = new Date(year, month - 1, day, hour, minute);
                 targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
                 return { time: formatTimeForInput(targetDate), method: `${hour}点${minute}分` };
             }
             
+            // X点
             match = text.match(/(\d{1,2})\s*点(?!\s*\d)/);
             if (match) {
                 hour = parseInt(match[1]); minute = 0;
+                hour = adjustHour(hour, text);
                 const todayTarget = new Date(year, month - 1, day, hour, minute);
                 targetDate = todayTarget <= now ? new Date(year, month - 1, day + 1, hour, minute) : todayTarget;
                 return { time: formatTimeForInput(targetDate), method: `${hour}点` };
@@ -413,11 +443,13 @@
                 return { time: formatTimeForInput(targetDate), method: '下个小时' };
             }
             
-            match = text.match(/后\s*天\s*(\d{1,2})(?::(\d{1,2}))?\s*点/);
+            // 后天时间
+            match = text.match(/后\s*天\s*(?:早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?)?[：:]?\s*(\d{1,2})(?::(\d{1,2}))?/);
             if (match) {
                 hour = parseInt(match[1]); minute = match[2] ? parseInt(match[2]) : 0;
+                hour = adjustHour(hour, text);
                 targetDate = new Date(year, month - 1, day + 2, hour, minute);
-                return { time: formatTimeForInput(targetDate), method: `后天${hour}点` };
+                return { time: formatTimeForInput(targetDate), method: `后天${hour}点${minute > 0 ? minute + '分' : ''}` };
             }
             
             return null;
@@ -427,6 +459,7 @@
             let event = text
                 .replace(/(\d+)\s*分钟?\s*后/gi, '')
                 .replace(/(\d+)\s*小时?\s*后/gi, '')
+                .replace(/(\d+)\s*天\s*后/gi, '')
                 .replace(/半\s*小\s*时?\s*后/gi, '')
                 .replace(/明\s*天/gi, '').replace(/今\s*[天日]/gi, '').replace(/后\s*天/gi, '')
                 .replace(/早\s*上?|上午?|中\s*午?|下\s*午?|晚\s*上?|晚?/gi, '')
